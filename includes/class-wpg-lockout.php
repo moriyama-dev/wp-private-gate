@@ -2,15 +2,18 @@
 /**
  * Tracks failed login attempts per IP address and locks out an IP once it
  * crosses the configured threshold. Lockout state lives in wp_options
- * (no dedicated DB table) keyed by an md5 hash of the IP address.
+ * (no dedicated DB table) keyed by an md5 hash of the IP address; the raw
+ * IP is kept in the option value so the admin screen can list it.
  */
 
 defined( 'ABSPATH' ) || exit;
 
 class WPG_Lockout {
 
-	const LOCKOUT_OPTION_PREFIX  = 'wpg_lockout_';
-	const ATTEMPTS_OPTION_PREFIX = 'wpg_attempts_';
+	// Deliberately not "wpg_lockout_" — that would collide with the
+	// wpg_lockout_duration setting when matched via a LIKE/prefix search.
+	const LOCKOUT_OPTION_PREFIX  = 'wpg_lockout_ip_';
+	const ATTEMPTS_OPTION_PREFIX = 'wpg_attempts_ip_';
 
 	public static function init() {
 		add_filter( 'authenticate', array( __CLASS__, 'block_if_locked_out' ), 30, 3 );
@@ -66,30 +69,50 @@ class WPG_Lockout {
 		);
 	}
 
+	/**
+	 * Fires on every failed login (including attempts made while already
+	 * locked out, since wp_signon() calls wp_login_failed whenever the
+	 * authenticate chain resolves to a WP_Error, regardless of which
+	 * filter produced it).
+	 */
 	public static function record_failed_attempt( $username ) {
 		$ip = self::get_client_ip();
-		if ( '' === $ip || self::is_locked_out( $ip ) ) {
+		if ( '' === $ip ) {
+			return;
+		}
+
+		$username = sanitize_text_field( $username );
+
+		if ( self::is_locked_out( $ip ) ) {
+			WPG_Login_Logger::log( $ip, $username, 'lockout' );
 			return;
 		}
 
 		$attempts_key = self::ATTEMPTS_OPTION_PREFIX . md5( $ip );
 		$attempts     = get_option( $attempts_key, array( 'count' => 0 ) );
+		$attempts['ip']    = $ip;
 		$attempts['count'] = isset( $attempts['count'] ) ? (int) $attempts['count'] + 1 : 1;
 
 		$max_attempts = max( 1, (int) get_option( 'wpg_max_attempts', 5 ) );
 
 		if ( $attempts['count'] >= $max_attempts ) {
 			$lockout_minutes = max( 1, (int) get_option( 'wpg_lockout_duration', 30 ) );
+			$until           = time() + ( $lockout_minutes * MINUTE_IN_SECONDS );
+
 			update_option(
 				self::LOCKOUT_OPTION_PREFIX . md5( $ip ),
-				array( 'until' => time() + ( $lockout_minutes * MINUTE_IN_SECONDS ) ),
+				array( 'ip' => $ip, 'until' => $until ),
 				false
 			);
 			delete_option( $attempts_key );
+
+			WPG_Login_Logger::log( $ip, $username, 'lockout' );
+			self::maybe_send_lockout_email( $ip, $until );
 			return;
 		}
 
 		update_option( $attempts_key, $attempts, false );
+		WPG_Login_Logger::log( $ip, $username, 'failure' );
 	}
 
 	public static function clear_attempts_on_success( $user_login ) {
@@ -98,5 +121,76 @@ class WPG_Lockout {
 			return;
 		}
 		delete_option( self::ATTEMPTS_OPTION_PREFIX . md5( $ip ) );
+		WPG_Login_Logger::log( $ip, sanitize_text_field( $user_login ), 'success' );
+	}
+
+	private static function maybe_send_lockout_email( $ip, $until ) {
+		if ( ! get_option( 'wpg_email_notifications', true ) ) {
+			return;
+		}
+
+		$to = get_option( 'admin_email' );
+		if ( ! $to ) {
+			return;
+		}
+
+		$subject = sprintf(
+			/* translators: %s: site name. */
+			__( '[%s] IPアドレスがロックアウトされました', 'wp-private-gate' ),
+			wp_specialchars_decode( get_bloginfo( 'name' ), ENT_QUOTES )
+		);
+
+		$body = sprintf(
+			/* translators: 1: IP address, 2: lockout expiry date/time. */
+			__( "IPアドレス %1\$s がログイン失敗の上限を超えたため、%2\$s までロックアウトされました。", 'wp-private-gate' ),
+			$ip,
+			wp_date( get_option( 'date_format' ) . ' ' . get_option( 'time_format' ), $until )
+		);
+
+		wp_mail( $to, $subject, $body );
+	}
+
+	/**
+	 * Returns every currently active lockout as an array of
+	 * [ 'option_name' => string, 'ip' => string, 'until' => int ].
+	 */
+	public static function get_active_lockouts() {
+		global $wpdb;
+
+		$rows = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT option_name, option_value FROM {$wpdb->options} WHERE option_name LIKE %s",
+				$wpdb->esc_like( self::LOCKOUT_OPTION_PREFIX ) . '%'
+			)
+		);
+
+		$lockouts = array();
+		$now      = time();
+
+		foreach ( $rows as $row ) {
+			$value = maybe_unserialize( $row->option_value );
+			if ( ! is_array( $value ) || ! isset( $value['until'] ) || $value['until'] <= $now ) {
+				continue;
+			}
+			$lockouts[] = array(
+				'option_name' => $row->option_name,
+				'ip'          => isset( $value['ip'] ) ? $value['ip'] : __( '(不明)', 'wp-private-gate' ),
+				'until'       => (int) $value['until'],
+			);
+		}
+
+		return $lockouts;
+	}
+
+	/**
+	 * Deletes a lockout option after validating it actually matches our
+	 * naming pattern, so a crafted request can't be used to delete an
+	 * arbitrary option.
+	 */
+	public static function unlock_by_option_name( $option_name ) {
+		if ( ! preg_match( '/^' . self::LOCKOUT_OPTION_PREFIX . '[a-f0-9]{32}$/', $option_name ) ) {
+			return false;
+		}
+		return delete_option( $option_name );
 	}
 }

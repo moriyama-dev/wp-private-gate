@@ -5,7 +5,7 @@ Tags: login, security, private, lockout, rest-api
 Requires at least: 6.0
 Tested up to: 6.7
 Requires PHP: 7.4
-Stable tag: 1.0.0
+Stable tag: 1.1.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,8 +31,11 @@ Developed and maintained by Yoshiro Moriyama, founder of Takumi Web Services —
 * Disables XML-RPC entirely.
 * Locks out an IP address after a configurable number of failed login attempts (default: 5 attempts / 30 minutes).
 * Lockout state is stored per IP address, not per username.
+* Lists every currently locked-out IP with a one-click unlock button.
+* Keeps a rolling log (most recent 1000 attempts) of login attempts with date, IP, username, and result.
+* Emails the site admin address whenever an IP gets locked out (can be turned off).
 * Single settings screen under Settings > WP Private Gate.
-* No custom database tables — everything is stored as options and removed cleanly on uninstall.
+* Uninstalling the plugin removes its options and its login-log table.
 
 == Installation ==
 
@@ -54,16 +57,29 @@ Yes. Since the entire site requires authentication, no unauthenticated client �
 
 By default, WP Private Gate intentionally shows a generic "incorrect username or password" message instead of revealing that the IP is locked out. This keeps an attacker running a brute-force attempt from learning that their requests are being blocked outright. This can be changed in Settings > WP Private Gate.
 
+= Will I get emailed every time someone fails to log in? =
+
+No. An email is only sent when an IP actually crosses the failed-attempt threshold and gets locked out, not on every failed attempt. This can be turned off in Settings > WP Private Gate.
+
+= Does the login log grow forever? =
+
+No. Only the most recent 1000 login attempts are kept; older entries are pruned automatically.
+
 == Screenshots ==
 
 1. Settings screen under Settings > WP Private Gate.
 
 == Changelog ==
 
+= 1.1.0 =
+* Added a list of currently locked-out IPs with a manual unlock button.
+* Added a login attempt log (date, IP, username, result), capped at the most recent 1000 entries.
+* Added an email notification to the site admin address when an IP is locked out.
+
 = 1.0.0 =
 * Initial release: site-wide lockdown, REST API blocking, XML-RPC disabling, and failed-login lockout.
 
 == Upgrade Notice ==
 
-= 1.0.0 =
-Initial release.
+= 1.1.0 =
+Adds a lockout list with manual unlock, a login attempt log, and email notifications on lockout.
