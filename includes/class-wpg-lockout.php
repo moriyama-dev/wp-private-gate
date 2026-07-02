@@ -40,7 +40,7 @@ class WPG_Lockout {
 		}
 
 		$ip = self::get_client_ip();
-		if ( '' === $ip ) {
+		if ( '' === $ip || WPG_Ip_Whitelist::is_whitelisted( $ip ) ) {
 			return $user;
 		}
 
@@ -77,7 +77,7 @@ class WPG_Lockout {
 	 */
 	public static function record_failed_attempt( $username ) {
 		$ip = self::get_client_ip();
-		if ( '' === $ip ) {
+		if ( '' === $ip || WPG_Ip_Whitelist::is_whitelisted( $ip ) ) {
 			return;
 		}
 

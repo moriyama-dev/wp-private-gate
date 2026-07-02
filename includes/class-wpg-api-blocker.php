@@ -17,7 +17,7 @@ class WPG_Api_Blocker {
 			return $result;
 		}
 
-		if ( ! is_user_logged_in() ) {
+		if ( ! is_user_logged_in() && ! WPG_Ip_Whitelist::is_whitelisted() ) {
 			return new WP_Error(
 				'wpg_rest_forbidden',
 				__( '認証が必要です。', 'wp-private-gate' ),

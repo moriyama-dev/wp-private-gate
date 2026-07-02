@@ -12,7 +12,7 @@ class WPG_Access_Control {
 	}
 
 	public static function maybe_redirect_to_login() {
-		if ( ! is_user_logged_in() ) {
+		if ( ! is_user_logged_in() && ! WPG_Ip_Whitelist::is_whitelisted() ) {
 			auth_redirect();
 		}
 	}

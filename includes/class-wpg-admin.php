@@ -114,6 +114,31 @@ class WPG_Admin {
 			self::PAGE_SLUG,
 			'wpg_main_section'
 		);
+
+		register_setting( self::OPTION_GROUP, 'wpg_ip_whitelist', array(
+			'type'              => 'string',
+			'sanitize_callback' => array( __CLASS__, 'sanitize_ip_whitelist' ),
+			'default'           => '',
+		) );
+
+		add_settings_section(
+			'wpg_whitelist_section',
+			__( 'IPホワイトリスト', 'wp-private-gate' ),
+			array( __CLASS__, 'render_whitelist_section_intro' ),
+			self::PAGE_SLUG
+		);
+
+		add_settings_field(
+			'wpg_ip_whitelist',
+			__( '許可するIP / CIDR', 'wp-private-gate' ),
+			array( __CLASS__, 'render_ip_whitelist_field' ),
+			self::PAGE_SLUG,
+			'wpg_whitelist_section'
+		);
+	}
+
+	public static function render_whitelist_section_intro() {
+		echo '<p>' . esc_html__( 'ここに登録したIPアドレスは、サイト全体のロックダウン・REST API/XML-RPCブロック・ログイン失敗ロックアウトの対象から除外されます。1行に1件、単一IP（例: 203.0.113.10）またはCIDR（例: 203.0.113.0/24）を入力してください。', 'wp-private-gate' ) . '</p>';
 	}
 
 	public static function sanitize_max_attempts( $value ) {
@@ -126,6 +151,36 @@ class WPG_Admin {
 
 	public static function sanitize_checkbox( $value ) {
 		return (bool) $value;
+	}
+
+	/**
+	 * Keeps only lines that look like a valid single IP or CIDR range, so a
+	 * typo can't silently create a rule that never matches (or, worse, one
+	 * that behaves unpredictably).
+	 */
+	public static function sanitize_ip_whitelist( $value ) {
+		$lines = preg_split( '/\r\n|\r|\n/', (string) $value );
+		$clean = array();
+
+		foreach ( $lines as $line ) {
+			$line = trim( $line );
+			if ( '' === $line ) {
+				continue;
+			}
+
+			list( $address, $bits ) = array_pad( explode( '/', $line, 2 ), 2, null );
+
+			if ( false === filter_var( $address, FILTER_VALIDATE_IP ) ) {
+				continue;
+			}
+			if ( null !== $bits && ( ! is_numeric( $bits ) || $bits < 0 || $bits > 128 ) ) {
+				continue;
+			}
+
+			$clean[] = $line;
+		}
+
+		return implode( "\n", $clean );
 	}
 
 	public static function render_max_attempts_field() {
@@ -156,6 +211,13 @@ class WPG_Admin {
 			'<label><input type="checkbox" name="wpg_email_notifications" value="1" %s /> %s</label>',
 			checked( (bool) get_option( 'wpg_email_notifications', true ), true, false ),
 			esc_html__( '管理者アドレス（一般設定のメールアドレス）宛にロックアウト発生を通知する', 'wp-private-gate' )
+		);
+	}
+
+	public static function render_ip_whitelist_field() {
+		printf(
+			'<textarea name="wpg_ip_whitelist" rows="5" cols="40" class="large-text code" placeholder="203.0.113.10&#10;203.0.113.0/24">%s</textarea>',
+			esc_textarea( get_option( 'wpg_ip_whitelist', '' ) )
 		);
 	}
 

@@ -24,6 +24,12 @@ delete_option( 'wpg_max_attempts' );
 delete_option( 'wpg_lockout_duration' );
 delete_option( 'wpg_show_lockout_message' );
 delete_option( 'wpg_email_notifications' );
+delete_option( 'wpg_ip_whitelist' );
 delete_option( 'wpg_db_version' );
 
 $wpdb->query( "DROP TABLE IF EXISTS {$wpdb->prefix}wpg_login_log" );
+
+// 2FA secrets/flags live in usermeta (shared across a multisite network by
+// design), so they're removed separately rather than via the options loop.
+delete_metadata( 'user', 0, 'wpg_2fa_enabled', '', true );
+delete_metadata( 'user', 0, '_wpg_2fa_secret', '', true );
